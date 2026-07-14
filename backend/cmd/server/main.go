@@ -17,6 +17,7 @@ func main() {
 	}
 	up := upstream.New(cfg.CocoPlayBase, cfg.UpstreamPublic)
 	chartSvc := charts.New(up, cfg.DataDir)
+	chartSvc.Warmup() // prebuild 站友搜索榜 so first visitor is not blocked
 	srv := api.New(cfg, up, chartSvc)
 	log.Printf("coco-music listening on %s (upstream configured=%v data=%s)", cfg.Addr, cfg.CocoPlayBase != "", cfg.DataDir)
 	if err := http.ListenAndServe(cfg.Addr, srv.Handler()); err != nil {

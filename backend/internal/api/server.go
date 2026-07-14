@@ -86,9 +86,10 @@ func envStatic() string {
 func fileServer(r chi.Router, path string, root http.FileSystem) {
 	if path != "/" && path[len(path)-1] != '/' {
 		r.Get(path, http.RedirectHandler(path+"/", 301).ServeHTTP)
+		r.Head(path, http.RedirectHandler(path+"/", 301).ServeHTTP)
 		path += "/"
 	}
-	r.Get(path+"*", func(w http.ResponseWriter, req *http.Request) {
+	handler := func(w http.ResponseWriter, req *http.Request) {
 		// never SPA-fallback API paths
 		if strings.HasPrefix(req.URL.Path, "/api/") {
 			writeJSON(w, 404, map[string]string{"error": "api not found"})
@@ -107,7 +108,9 @@ func fileServer(r chi.Router, path string, root http.FileSystem) {
 			_ = f.Close()
 		}
 		http.StripPrefix(strings.TrimSuffix(path, "/"), fs).ServeHTTP(w, req)
-	})
+	}
+	r.Get(path+"*", handler)
+	r.Head(path+"*", handler)
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

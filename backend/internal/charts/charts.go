@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/cocojojo5213/coco-music/internal/upstream"
@@ -30,22 +31,24 @@ type Chart struct {
 }
 
 type Service struct {
-	up       *upstream.Client
+	up        *upstream.Client
 	statsPath string
 
 	mu    sync.Mutex
 	stats *statsDoc
 
-	boardMu   sync.Mutex
-	board     Chart
-	boardExp  time.Time
-	boardTTL  time.Duration
+	boardMu     sync.Mutex
+	board       Chart
+	boardExp    time.Time
+	boardTTL    time.Duration
+	refreshing  bool
+	buildMu     sync.Mutex // single in-flight full rebuild
 }
 
 type statsDoc struct {
-	Version   int                  `json:"version"`
-	UpdatedAt string               `json:"updatedAt"`
-	Searches  map[string]termStat  `json:"searches"`
+	Version   int                 `json:"version"`
+	UpdatedAt string              `json:"updatedAt"`
+	Searches  map[string]termStat `json:"searches"`
 }
 
 type termStat struct {
@@ -66,7 +69,17 @@ func New(up *upstream.Client, dataDir string) *Service {
 		boardTTL:  10 * time.Minute,
 	}
 	s.stats = s.loadStats()
+	s.pruneNoiseStats()
 	return s
+}
+
+// Warmup builds the board in the background so first visitor is not blocked.
+func (s *Service) Warmup() {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
+		defer cancel()
+		_, _ = s.Get(ctx, chartID, 24)
+	}()
 }
 
 func (s *Service) Catalog() []map[string]string {
@@ -99,10 +112,16 @@ func (s *Service) RecordSearch(term string) {
 	_ = s.persistStatsLocked()
 	s.mu.Unlock()
 
-	// invalidate board cache so next fetch re-ranks
+	// Soft-expire only: keep last board as stale fallback so users are never blocked 50s+.
 	s.boardMu.Lock()
 	s.boardExp = time.Time{}
 	s.boardMu.Unlock()
+	// async re-rank
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		_, _ = s.refresh(ctx, 24)
+	}()
 }
 
 func (s *Service) List(ctx context.Context, perChart int) ([]Chart, error) {
@@ -114,22 +133,53 @@ func (s *Service) List(ctx context.Context, perChart int) ([]Chart, error) {
 }
 
 func (s *Service) Get(ctx context.Context, id string, limit int) (Chart, error) {
-	if id != "" && id != chartID && id != "trending-2026" && id != "hot" {
-		// only one board; tolerate old ids by serving community board
-		if id != chartID {
-			// still serve community board for unknown single-chart clients
-		}
-	}
+	_ = id // single board
 	if limit <= 0 {
 		limit = 24
 	}
 
 	s.boardMu.Lock()
-	if time.Now().Before(s.boardExp) && len(s.board.Items) > 0 {
-		c := s.board
-		if len(c.Items) > limit {
-			c.Items = append([]json.RawMessage{}, c.Items[:limit]...)
+	fresh := time.Now().Before(s.boardExp) && len(s.board.Items) > 0
+	stale := len(s.board.Items) > 0
+	if fresh {
+		c := clipChart(s.board, limit)
+		s.boardMu.Unlock()
+		return c, nil
+	}
+	// Stale-while-revalidate: return last good board immediately.
+	if stale {
+		c := clipChart(s.board, limit)
+		needRefresh := !s.refreshing
+		if needRefresh {
+			s.refreshing = true
 		}
+		s.boardMu.Unlock()
+		if needRefresh {
+			go func() {
+				rctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+				defer cancel()
+				_, _ = s.refresh(rctx, 24)
+				s.boardMu.Lock()
+				s.refreshing = false
+				s.boardMu.Unlock()
+			}()
+		}
+		return c, nil
+	}
+	s.boardMu.Unlock()
+
+	// No cache yet — must build once (startup / first request).
+	return s.refresh(ctx, limit)
+}
+
+func (s *Service) refresh(ctx context.Context, limit int) (Chart, error) {
+	s.buildMu.Lock()
+	defer s.buildMu.Unlock()
+
+	// another waiter may have filled cache while we queued
+	s.boardMu.Lock()
+	if time.Now().Before(s.boardExp) && len(s.board.Items) > 0 {
+		c := clipChart(s.board, limit)
 		s.boardMu.Unlock()
 		return c, nil
 	}
@@ -137,6 +187,14 @@ func (s *Service) Get(ctx context.Context, id string, limit int) (Chart, error) 
 
 	items, err := s.build(ctx, limit)
 	if err != nil {
+		// if build fails but we have stale, keep serving it
+		s.boardMu.Lock()
+		if len(s.board.Items) > 0 {
+			c := clipChart(s.board, limit)
+			s.boardMu.Unlock()
+			return c, nil
+		}
+		s.boardMu.Unlock()
 		return Chart{}, err
 	}
 	chart := Chart{
@@ -150,19 +208,24 @@ func (s *Service) Get(ctx context.Context, id string, limit int) (Chart, error) 
 	s.board = chart
 	s.boardExp = time.Now().Add(s.boardTTL)
 	s.boardMu.Unlock()
-	return chart, nil
+	return clipChart(chart, limit), nil
+}
+
+func clipChart(c Chart, limit int) Chart {
+	if limit > 0 && len(c.Items) > limit {
+		c.Items = append([]json.RawMessage{}, c.Items[:limit]...)
+	}
+	return c
 }
 
 func (s *Service) build(ctx context.Context, limit int) ([]json.RawMessage, error) {
-	terms := s.topTerms(40)
-	// bootstrap from coco-play shared search stats when local is thin
+	terms := s.topTerms(24)
 	if len(terms) < 8 {
 		if seeded := s.seedFromUpstream(ctx); len(seeded) > 0 {
-			terms = s.topTerms(40)
+			terms = s.topTerms(24)
 		}
 	}
 	if len(terms) == 0 {
-		// last resort: equal-weight seeds so board is not empty
 		now := time.Now().UTC().Format(time.RFC3339)
 		s.mu.Lock()
 		if s.stats.Searches == nil {
@@ -170,40 +233,75 @@ func (s *Service) build(ctx context.Context, limit int) ([]json.RawMessage, erro
 		}
 		for _, t := range []string{"热歌", "流行", "周杰伦", "林俊杰", "邓紫棋", "李荣浩"} {
 			term := normalizeTerm(t)
+			if isNoiseTerm(term) {
+				continue
+			}
 			s.stats.Searches[term] = termStat{Term: term, Count: 1, FirstAt: now, LastAt: now}
 		}
 		s.stats.UpdatedAt = now
 		_ = s.persistStatsLocked()
 		s.mu.Unlock()
-		terms = s.topTerms(40)
+		terms = s.topTerms(24)
+	}
+
+	// Resolve top terms in parallel (upstream search is the bottleneck).
+	type result struct {
+		idx  int
+		ts   termStat
+		item json.RawMessage
+		ok   bool
+	}
+	workerN := 4
+	if len(terms) < workerN {
+		workerN = len(terms)
+	}
+	jobs := make(chan int, len(terms))
+	outCh := make(chan result, len(terms))
+	var wg sync.WaitGroup
+	for w := 0; w < workerN; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				ts := terms[i]
+				item, ok := s.resolveTerm(ctx, ts.Term)
+				outCh <- result{idx: i, ts: ts, item: item, ok: ok}
+			}
+		}()
+	}
+	for i := range terms {
+		jobs <- i
+	}
+	close(jobs)
+	go func() {
+		wg.Wait()
+		close(outCh)
+	}()
+
+	byIdx := make(map[int]result, len(terms))
+	for r := range outCh {
+		byIdx[r.idx] = r
 	}
 
 	seen := map[string]bool{}
 	var out []json.RawMessage
-
-	for _, ts := range terms {
-		if ctx.Err() != nil || len(out) >= limit {
-			break
-		}
-		item, ok := s.resolveTerm(ctx, ts.Term)
-		if !ok {
+	for i := 0; i < len(terms) && len(out) < limit; i++ {
+		r, ok := byIdx[i]
+		if !ok || !r.ok {
 			continue
 		}
+		item := r.item
 		key := trackDedupeKey(item)
-		if key == "" || seen[key] {
-			continue
-		}
-		if isWeakAlternate(item) {
+		if key == "" || seen[key] || isWeakAlternate(item) {
 			continue
 		}
 		seen[key] = true
-
 		var obj map[string]any
 		if json.Unmarshal(item, &obj) == nil {
 			obj["rank"] = len(out) + 1
 			obj["chartId"] = chartID
-			obj["searchCount"] = ts.Count
-			obj["searchTerm"] = ts.Term
+			obj["searchCount"] = r.ts.Count
+			obj["searchTerm"] = r.ts.Term
 			if b, err := json.Marshal(obj); err == nil {
 				item = b
 			}
@@ -217,7 +315,7 @@ func (s *Service) build(ctx context.Context, limit int) ([]json.RawMessage, erro
 }
 
 func (s *Service) resolveTerm(ctx context.Context, term string) (json.RawMessage, bool) {
-	termCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	termCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	raw, status, err := s.up.GetJSON(termCtx, "/api/music/search", url.Values{"q": {term}})
 	if err != nil || status >= 400 {
@@ -238,12 +336,11 @@ func (s *Service) resolveTerm(ctx context.Context, term string) (json.RawMessage
 			return item, true
 		}
 	}
-	// fall back to first if all marked weak
 	return payload.Items[0], true
 }
 
 func (s *Service) seedFromUpstream(ctx context.Context) []termStat {
-	termCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	termCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 	raw, status, err := s.up.GetJSON(termCtx, "/api/music/hot", url.Values{"count": {"12"}})
 	if err != nil || status >= 400 {
@@ -268,13 +365,11 @@ func (s *Service) seedFromUpstream(ctx context.Context) []termStat {
 	if s.stats.Searches == nil {
 		s.stats.Searches = map[string]termStat{}
 	}
-	// merge upstream top searches as baseline (only if local term missing or lower)
 	for _, t := range payload.Stats.TopSearches {
 		term := normalizeTerm(t.Term)
-		if term == "" || t.Count <= 0 {
+		if term == "" || t.Count <= 0 || isNoiseTerm(term) {
 			continue
 		}
-		// scale down shared counts so local activity can overtake quickly
 		seedCount := t.Count
 		if seedCount > 50 {
 			seedCount = 50 + (seedCount-50)/10
@@ -288,7 +383,6 @@ func (s *Service) seedFromUpstream(ctx context.Context) []termStat {
 			s.stats.Searches[term] = cur
 		}
 	}
-	// also seed titles from current hot items lightly
 	for _, item := range payload.Items {
 		var t struct {
 			Title string `json:"title"`
@@ -319,7 +413,7 @@ func (s *Service) topTerms(limit int) []termStat {
 	defer s.mu.Unlock()
 	entries := make([]termStat, 0, len(s.stats.Searches))
 	for _, e := range s.stats.Searches {
-		if e.Term != "" && e.Count > 0 {
+		if e.Term != "" && e.Count > 0 && !isNoiseTerm(e.Term) {
 			entries = append(entries, e)
 		}
 	}
@@ -347,8 +441,33 @@ func (s *Service) loadStats() *statsDoc {
 	return doc
 }
 
+func (s *Service) pruneNoiseStats() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stats.Searches == nil {
+		return
+	}
+	changed := false
+	for k, v := range s.stats.Searches {
+		term := normalizeTerm(v.Term)
+		if term == "" || isNoiseTerm(term) {
+			delete(s.stats.Searches, k)
+			changed = true
+			continue
+		}
+		if term != k || term != v.Term {
+			delete(s.stats.Searches, k)
+			v.Term = term
+			s.stats.Searches[term] = v
+			changed = true
+		}
+	}
+	if changed {
+		_ = s.persistStatsLocked()
+	}
+}
+
 func (s *Service) persistStatsLocked() error {
-	// trim
 	if len(s.stats.Searches) > 300 {
 		entries := make([]termStat, 0, len(s.stats.Searches))
 		for _, e := range s.stats.Searches {
@@ -390,11 +509,29 @@ func isNoiseTerm(term string) bool {
 	if term == "" {
 		return true
 	}
-	// pure years / too generic single digits
+	// pure years
 	if len(term) == 4 && term >= "1900" && term <= "2100" {
 		return true
 	}
-	for _, w := range []string{"dj", "女版", "男版", "节奏版", "默涵", "伴奏", "直播"} {
+	// catalog junk like "2026- 心雨-1"
+	if strings.Contains(term, "2026-") || strings.Contains(term, "2025-") {
+		return true
+	}
+	// mostly digits / id-like
+	digits := 0
+	letters := 0
+	for _, r := range term {
+		if unicode.IsDigit(r) {
+			digits++
+		}
+		if unicode.IsLetter(r) || r > 127 {
+			letters++
+		}
+	}
+	if digits >= 4 && letters <= 2 {
+		return true
+	}
+	for _, w := range []string{"dj", "女版", "男版", "节奏版", "默涵", "伴奏", "直播", "test"} {
 		if strings.Contains(term, w) {
 			return true
 		}
