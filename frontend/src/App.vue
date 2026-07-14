@@ -14,9 +14,9 @@ onMounted(() => {
 
 <template>
   <div class="min-h-dvh bg-ink text-white">
-    <main class="mx-auto min-h-dvh max-w-lg pb-40">
+    <main class="mx-auto min-h-dvh max-w-lg pb-[calc(7.5rem+env(safe-area-inset-bottom,0px))]">
       <RouterView />
-      <footer class="px-4 pb-6 pt-8 text-center">
+      <footer class="px-4 pb-4 pt-10 text-center">
         <div class="text-[12px] font-semibold tracking-wide text-white/70">摇摆熊 · Coco Music</div>
         <div class="mt-1 text-[10px] text-muted">Made by 摇摆熊</div>
       </footer>

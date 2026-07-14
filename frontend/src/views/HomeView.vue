@@ -46,12 +46,21 @@ function searchCount(t: { searchCount?: number }) {
     <header class="mb-5 flex items-end justify-between gap-3 pt-2">
       <div class="min-w-0">
         <p class="text-[13px] text-muted">{{ greeting }} · 摇摆熊</p>
-        <h1 class="text-[28px] font-bold leading-tight tracking-tight">Listen Now</h1>
+        <h1 class="text-[28px] font-bold leading-tight tracking-tight">现在就听</h1>
       </div>
       <div class="flex shrink-0 gap-2">
-        <button class="h-9 rounded-full bg-white/10 px-3 text-[13px]" @click="refresh">刷新</button>
         <button
-          class="h-9 rounded-full bg-accent px-4 text-[13px] font-semibold shadow-lg shadow-accent/30"
+          type="button"
+          class="h-9 rounded-full bg-white/10 px-3 text-[13px] active:scale-95"
+          :disabled="library.loading"
+          @click="refresh"
+        >
+          {{ library.loading ? '…' : '刷新' }}
+        </button>
+        <button
+          type="button"
+          class="h-9 rounded-full bg-accent px-4 text-[13px] font-semibold shadow-lg shadow-accent/30 active:scale-95 disabled:opacity-50"
+          :disabled="!library.tracks.length"
           @click="playAll"
         >
           播放
@@ -59,10 +68,14 @@ function searchCount(t: { searchCount?: number }) {
       </div>
     </header>
 
-    <section v-if="library.loading" class="py-20 text-center text-muted">加载站友搜索榜…</section>
-    <section v-else-if="library.error" class="py-16 text-center">
+    <section v-if="library.loading && !library.tracks.length" class="py-20 text-center text-muted">
+      加载站友搜索榜…
+    </section>
+    <section v-else-if="library.error && !library.tracks.length" class="py-16 text-center">
       <p class="text-accent">{{ library.error }}</p>
-      <button class="mt-3 h-9 rounded-full bg-white/10 px-4 text-sm" @click="refresh">重试</button>
+      <button type="button" class="mt-3 h-9 rounded-full bg-white/10 px-4 text-sm" @click="refresh">
+        重试
+      </button>
     </section>
 
     <template v-else>
@@ -73,7 +86,7 @@ function searchCount(t: { searchCount?: number }) {
               <div class="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent">
                 Ranking
               </div>
-              <h2 class="truncate text-[22px] font-bold leading-tight">
+              <h2 class="truncate text-[20px] font-bold leading-tight">
                 {{ library.chart?.name || '站友搜索榜' }}
               </h2>
               <p class="truncate text-[12px] text-muted">
@@ -81,7 +94,9 @@ function searchCount(t: { searchCount?: number }) {
               </p>
             </div>
             <div class="shrink-0 rounded-2xl bg-accent/15 px-3 py-2 text-center">
-              <div class="text-[18px] font-bold tabular-nums text-accent">{{ library.tracks.length }}</div>
+              <div class="text-[18px] font-bold tabular-nums text-accent">
+                {{ library.tracks.length }}
+              </div>
               <div class="text-[10px] text-muted">首</div>
             </div>
           </div>
@@ -89,7 +104,7 @@ function searchCount(t: { searchCount?: number }) {
       </section>
 
       <section v-if="hero" class="mb-7">
-        <button class="w-full text-center" @click="playOne(hero.id)">
+        <button type="button" class="w-full text-center active:opacity-95" @click="playOne(hero.id)">
           <CoverArt :src="coverOf(hero)" size="hero" rounded="rounded-[22px]" />
           <div class="mt-3 px-2">
             <div class="text-[11px] font-semibold uppercase tracking-[0.14em] text-accent">
@@ -108,14 +123,15 @@ function searchCount(t: { searchCount?: number }) {
         <div class="no-scrollbar -mx-4 flex gap-3 overflow-x-auto px-4 pb-1">
           <button
             v-for="(t, idx) in rail"
-            :key="'rail-' + t.id"
-            class="w-[118px] shrink-0 text-left"
+            :key="'rail-' + t.id + '-' + idx"
+            type="button"
+            class="w-[118px] shrink-0 text-left active:opacity-90"
             @click="playOne(t.id)"
           >
             <div class="relative">
               <CoverArt :src="coverOf(t)" size="tile" rounded="rounded-2xl" />
               <span
-                class="absolute left-2 top-2 rounded-md bg-black/55 px-1.5 py-0.5 text-[11px] font-bold"
+                class="absolute left-2 top-2 rounded-md bg-black/55 px-1.5 py-0.5 text-[11px] font-bold tabular-nums"
                 >{{ idx + 1 }}</span
               >
             </div>
@@ -130,16 +146,24 @@ function searchCount(t: { searchCount?: number }) {
           <h2 class="text-[20px] font-bold leading-none">排行榜</h2>
           <span class="text-[11px] text-muted">搜索越多越靠前</span>
         </div>
-        <div class="glass-card rounded-3xl p-1.5">
-          <div v-for="(t, i) in library.tracks" :key="t.id + '-' + i" class="flex items-center gap-1">
-            <div class="w-10 shrink-0 text-center">
+        <div class="glass-card overflow-hidden rounded-3xl px-1 py-1">
+          <div
+            v-for="(t, i) in library.tracks"
+            :key="t.id + '-' + i"
+            class="flex items-stretch gap-0.5 border-b border-white/[0.04] last:border-0"
+          >
+            <div class="flex w-9 shrink-0 flex-col items-center justify-center pt-1">
               <div
                 class="text-[15px] font-bold tabular-nums leading-none"
                 :class="i < 3 ? 'text-accent' : 'text-muted'"
               >
                 {{ i + 1 }}
               </div>
-              <div v-if="t.searchCount" class="mt-0.5 text-[9px] tabular-nums text-muted/80">
+              <div
+                v-if="t.searchCount"
+                class="mt-1 max-w-[2.25rem] truncate text-center text-[9px] tabular-nums text-muted/70"
+                :title="searchCount(t)"
+              >
                 {{ t.searchCount }}
               </div>
             </div>

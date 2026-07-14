@@ -82,6 +82,10 @@ body {
   height: 4px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.15);
+  outline: none;
+}
+.progress:disabled {
+  opacity: 0.45;
 }
 .progress::-webkit-slider-thumb {
   appearance: none;
@@ -97,6 +101,10 @@ body {
   border: 0;
   border-radius: 999px;
   background: white;
+}
+
+button:disabled {
+  cursor: not-allowed;
 }
 
 /* prevent iOS input zoom */
