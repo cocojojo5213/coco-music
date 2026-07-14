@@ -1,0 +1,11 @@
+# Copy to config.yml and set tunnel id + credentials path.
+# Example public demo:
+#   music.52131415.xyz -> http://127.0.0.1:18280
+
+tunnel: <TUNNEL_UUID>
+credentials-file: /etc/cloudflared/<TUNNEL_UUID>.json
+
+ingress:
+  - hostname: music.52131415.xyz
+    service: http://127.0.0.1:18280
+  - service: http_status:404

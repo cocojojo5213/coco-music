@@ -1,0 +1,11 @@
+name: coco-music-cloudflare
+
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:2026.5.2
+    container_name: coco-music-cloudflared
+    restart: unless-stopped
+    command: tunnel --config /etc/cloudflared/config.yml run
+    network_mode: host
+    volumes:
+      - ./:/etc/cloudflared:ro

@@ -1,0 +1,22 @@
+[Unit]
+Description=摇摆熊 Coco Music web player
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/path/to/coco-music/backend
+# Prefer an untracked env file on the host:
+# EnvironmentFile=/path/to/coco-music/deploy/local.env
+Environment=ADDR=127.0.0.1:18280
+Environment=STATIC_DIR=/path/to/coco-music/frontend/dist
+Environment=PUBLIC_ORIGIN=https://music.52131415.xyz
+Environment=DATA_DIR=/path/to/coco-music/data
+# Set these only on the server — do not commit real upstream URLs:
+# Environment=COCO_PLAY_BASE=
+# Environment=UPSTREAM_PUBLIC=
+ExecStart=/path/to/coco-music/backend/bin/coco-music
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

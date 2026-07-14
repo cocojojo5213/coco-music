@@ -1,0 +1,38 @@
+# deps / build
+node_modules/
+frontend/dist/
+backend/bin/
+backend/data/*.db
+backend/data/*.db-*
+backend/data/auth.env
+backend/data/*.env
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# cloudflare secrets
+deploy/cloudflared/*.json
+!deploy/cloudflared/*.json.example
+
+# OS
+Thumbs.db
+backend/data/*.bak*
+
+# runtime
+data/
+backend/data/
+backend/bin/
+
+
+# private deploy secrets / upstream
+deploy/local.env
+deploy/*.local.env
+.env
+deploy/cloudflared/config.yml

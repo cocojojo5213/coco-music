@@ -1,0 +1,12 @@
+services:
+  coco-music:
+    build: .
+    container_name: coco-music
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - .env
+    environment:
+      ADDR: "127.0.0.1:18280"
+      STATIC_DIR: /app/frontend/dist
+      PUBLIC_ORIGIN: "https://music.52131415.xyz"
