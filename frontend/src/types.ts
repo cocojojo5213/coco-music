@@ -12,6 +12,8 @@ export interface Track {
   url: string
   /** CDN direct media URL — browser should fetch this, never via coco-music proxy */
   directUrl?: string
+  /** true when backend confirmed a third-party CDN direct link */
+  clientDirect?: boolean
   proxyUrl?: string
   streamUrl?: string
   lrc?: string

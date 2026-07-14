@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { api, mediaSrc } from '@/api/client'
 import type { Track } from '@/types'
 import { localPlaybackUrl } from '@/lib/localLibrary'
+import { canClientDirect } from '@/lib/directMedia'
 
 export const usePlayerStore = defineStore('player', {
   state: () => ({
@@ -56,14 +57,17 @@ export const usePlayerStore = defineStore('player', {
       }
     },
     async playTracks(tracks: Track[], startId?: string) {
-      const playable = tracks.filter((t) => t.playable !== false && (t.url || t.proxyUrl))
+      // Keep tracks that are CDN-direct or may already be cached locally.
+      const playable = tracks.filter(
+        (t) => t.playable !== false && (canClientDirect(t) || t.isDownloaded || t.url || t.directUrl),
+      )
       if (!playable.length) return
       this.queue = [...playable]
       const idx = startId ? playable.findIndex((t) => t.id === startId) : 0
       this.index = idx >= 0 ? idx : 0
       await this.loadCurrent(true)
     },
-    async loadCurrent(autoplay: boolean) {
+    async loadCurrent(autoplay: boolean, _depth = 0) {
       const track = this.current
       if (!track) return
       const audio = this.ensureAudio()
@@ -72,7 +76,7 @@ export const usePlayerStore = defineStore('player', {
       this.usingProxy = false
       this.revokeObjectUrl()
 
-      // prefer client-local download blob
+      // prefer client-local download blob, then CDN direct only (never host proxy/stream)
       let src = ''
       try {
         const local = await localPlaybackUrl(track)
@@ -85,10 +89,20 @@ export const usePlayerStore = defineStore('player', {
       }
       if (!src) src = mediaSrc(track, false)
 
+      if (!src) {
+        // no safe media source — skip to next instead of routing audio via our server
+        this.loading = false
+        if (_depth < this.queue.length) {
+          this.index = (this.index + 1) % this.queue.length
+          await this.loadCurrent(autoplay, _depth + 1)
+        }
+        return
+      }
+
       audio.src = src
       try {
         if (autoplay) await audio.play()
-        // fire-and-forget play stats to upstream via BFF
+        // fire-and-forget play stats to upstream via BFF (metadata only)
         void api.playEvent(track)
       } catch {
         // autoplay blocked

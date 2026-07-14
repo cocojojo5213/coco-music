@@ -126,11 +126,12 @@ export function formatBytes(n?: number) {
 }
 
 export function mediaSrc(track: Track, useProxy = false) {
-  // Default: CDN direct (zero coco-music egress). Proxy only on explicit fallback.
-  if (!useProxy) {
-    const direct = directMediaCandidates(track)[0]
-    if (direct) return direct
-    return track.url || ''
+  // Default: CDN direct only (zero host egress). Never return stream/proxy on our hosts.
+  const direct = directMediaCandidates(track)[0]
+  if (direct) return direct
+  if (useProxy) {
+    // even explicit proxy fallback is disabled for egress safety
+    return ''
   }
-  return track.proxyUrl || track.url || ''
+  return ''
 }

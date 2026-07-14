@@ -179,6 +179,45 @@ func AbsolutizeAPIURL(raw, publicOrigin string) string {
 	return raw
 }
 
+// TrackDirectURL extracts a third-party CDN media URL from a track JSON object.
+func TrackDirectURL(raw json.RawMessage) string {
+	var m map[string]any
+	if json.Unmarshal(raw, &m) != nil {
+		return ""
+	}
+	return trackDirectFromMap(m)
+}
+
+// EnsureTrackDirect rewrites url/directUrl to a CDN direct link when available.
+func EnsureTrackDirect(raw json.RawMessage) (json.RawMessage, bool) {
+	var m map[string]any
+	if json.Unmarshal(raw, &m) != nil {
+		return raw, false
+	}
+	d := trackDirectFromMap(m)
+	if d == "" {
+		return raw, false
+	}
+	m["directUrl"] = d
+	m["url"] = d
+	m["clientDirect"] = true
+	b, err := json.Marshal(m)
+	if err != nil {
+		return raw, false
+	}
+	return b, true
+}
+
+func trackDirectFromMap(m map[string]any) string {
+	for _, k := range []string{"directUrl", "url", "proxyUrl", "streamUrl"} {
+		s, _ := m[k].(string)
+		if d := ExtractDirectMediaURL(s); d != "" {
+			return d
+		}
+	}
+	return ""
+}
+
 // RewriteTrackJSON preserves CDN direct links for client-side download/play.
 // It no longer wraps external media into /api/proxy (that would burn server egress).
 func RewriteTrackJSON(raw json.RawMessage, publicOrigin string) (json.RawMessage, error) {
@@ -186,8 +225,49 @@ func RewriteTrackJSON(raw json.RawMessage, publicOrigin string) (json.RawMessage
 	if err := json.Unmarshal(raw, &root); err != nil {
 		return raw, err
 	}
-	rewriteValue(root, strings.TrimRight(publicOrigin, "/"))
+	public := strings.TrimRight(publicOrigin, "/")
+	rewriteValue(root, public)
+	preferDirectInLists(root)
 	return json.Marshal(root)
+}
+
+// preferDirectInLists puts CDN-direct tracks first so clients download/play without our egress.
+func preferDirectInLists(v any) {
+	switch t := v.(type) {
+	case map[string]any:
+		if items, ok := t["items"].([]any); ok {
+			t["items"] = orderDirectFirst(items)
+		}
+		for _, child := range t {
+			preferDirectInLists(child)
+		}
+	case []any:
+		for _, child := range t {
+			preferDirectInLists(child)
+		}
+	}
+}
+
+func orderDirectFirst(items []any) []any {
+	direct := make([]any, 0, len(items))
+	other := make([]any, 0, len(items))
+	for _, it := range items {
+		m, ok := it.(map[string]any)
+		if !ok {
+			other = append(other, it)
+			continue
+		}
+		if d := trackDirectFromMap(m); d != "" {
+			m["directUrl"] = d
+			m["url"] = d
+			m["clientDirect"] = true
+			direct = append(direct, m)
+		} else {
+			m["clientDirect"] = false
+			other = append(other, m)
+		}
+	}
+	return append(direct, other...)
 }
 
 func rewriteValue(v any, public string) {

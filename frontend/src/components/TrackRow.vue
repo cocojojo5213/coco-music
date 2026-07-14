@@ -6,6 +6,8 @@ import CoverArt from './CoverArt.vue'
 import { usePlayerStore } from '@/stores/player'
 import { useLibraryStore } from '@/stores/library'
 import { coverOf } from '@/lib/cover'
+import { canClientDirect } from '@/lib/directMedia'
+import { computed } from 'vue'
 
 const props = defineProps<{
   track: Track
@@ -16,6 +18,7 @@ const player = usePlayerStore()
 const library = useLibraryStore()
 const busy = ref(false)
 const err = ref('')
+const directOk = computed(() => canClientDirect(props.track) || !!props.track.isDownloaded)
 
 async function play() {
   const q = props.queue?.length ? props.queue : [props.track]
@@ -30,6 +33,10 @@ function fav(e: Event) {
 async function dl(e: Event) {
   e.stopPropagation()
   err.value = ''
+  if (!props.track.isDownloaded && !canClientDirect(props.track)) {
+    err.value = '无CDN直链，已跳过（不经本站中转）'
+    return
+  }
   busy.value = true
   try {
     if (props.track.isDownloaded) await library.removeDownload(props.track)
@@ -67,7 +74,17 @@ async function dl(e: Event) {
         >
         <span
           class="inline-flex h-9 w-9 items-center justify-center rounded-full text-[15px]"
-          :class="busy ? 'text-white/40' : 'text-muted'"
+          :class="
+            track.isDownloaded
+              ? 'text-muted'
+              : !directOk
+                ? 'text-white/25'
+                : busy
+                  ? 'text-white/40'
+                  : 'text-muted'
+          "
+          :title="track.isDownloaded ? '已下载' : directOk ? '直链下载' : '无CDN直链'
+          "
           @click="dl"
           >{{ track.isDownloaded ? '✓' : busy ? '…' : '↓' }}</span
         >

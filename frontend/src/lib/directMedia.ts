@@ -47,6 +47,7 @@ export function directMediaCandidates(track: {
   url?: string
   proxyUrl?: string
   streamUrl?: string
+  clientDirect?: boolean
 }): string[] {
   const out: string[] = []
   const seen = new Set<string>()
@@ -58,4 +59,16 @@ export function directMediaCandidates(track: {
     }
   }
   return out
+}
+
+/** Whether this track can be downloaded/played without our server egress. */
+export function canClientDirect(track: {
+  directUrl?: string
+  url?: string
+  proxyUrl?: string
+  streamUrl?: string
+  clientDirect?: boolean
+}): boolean {
+  if (track.clientDirect && extractDirectMediaUrl(track.directUrl || track.url)) return true
+  return directMediaCandidates(track).length > 0
 }

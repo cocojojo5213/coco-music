@@ -291,6 +291,12 @@ func (s *Service) build(ctx context.Context, limit int) ([]json.RawMessage, erro
 			continue
 		}
 		item := r.item
+		// hard requirement: chart tracks must be browser-direct CDN only
+		fixed, okDirect := upstream.EnsureTrackDirect(item)
+		if !okDirect {
+			continue
+		}
+		item = fixed
 		key := trackDedupeKey(item)
 		if key == "" || seen[key] || isWeakAlternate(item) {
 			continue
@@ -302,6 +308,7 @@ func (s *Service) build(ctx context.Context, limit int) ([]json.RawMessage, erro
 			obj["chartId"] = chartID
 			obj["searchCount"] = r.ts.Count
 			obj["searchTerm"] = r.ts.Term
+			obj["clientDirect"] = true
 			if b, err := json.Marshal(obj); err == nil {
 				item = b
 			}
@@ -331,12 +338,25 @@ func (s *Service) resolveTerm(ctx context.Context, term string) (json.RawMessage
 	if json.Unmarshal(rewritten, &payload) != nil || len(payload.Items) == 0 {
 		return nil, false
 	}
+	// Only accept tracks with third-party CDN direct URLs (no stream/proxy via our hosts).
 	for _, item := range prioritizeItems(payload.Items, term) {
-		if !isWeakAlternate(item) {
-			return item, true
+		if isWeakAlternate(item) {
+			continue
+		}
+		if fixed, ok := upstream.EnsureTrackDirect(item); ok {
+			return fixed, true
 		}
 	}
-	return payload.Items[0], true
+	// last pass: any non-weak with direct, even lower score
+	for _, item := range payload.Items {
+		if isWeakAlternate(item) {
+			continue
+		}
+		if fixed, ok := upstream.EnsureTrackDirect(item); ok {
+			return fixed, true
+		}
+	}
+	return nil, false
 }
 
 func (s *Service) seedFromUpstream(ctx context.Context) []termStat {
@@ -622,6 +642,11 @@ func prioritizeItems(items []json.RawMessage, term string) []json.RawMessage {
 		}
 		if !isWeakAlternate(item) {
 			score += 15
+		}
+		if upstream.TrackDirectURL(item) != "" {
+			score += 120 // strongly prefer browser-direct CDN
+		} else {
+			score -= 250
 		}
 		score -= len([]rune(t.Title)) / 8
 		out = append(out, scored{raw: item, score: score})
