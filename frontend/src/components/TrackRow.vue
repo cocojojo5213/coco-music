@@ -9,6 +9,8 @@ import { useLibraryStore } from '@/stores/library'
 import { coverOf } from '@/lib/cover'
 import { canClientDirect } from '@/lib/directMedia'
 import { trackKey } from '@/lib/localLibrary'
+import { useUiStore } from '@/stores/ui'
+import { tick } from '@/lib/haptics'
 
 const props = defineProps<{
   track: Track
@@ -17,6 +19,7 @@ const props = defineProps<{
 
 const player = usePlayerStore()
 const library = useLibraryStore()
+const ui = useUiStore()
 const busy = ref(false)
 const err = ref('')
 
@@ -34,21 +37,32 @@ async function play() {
 }
 
 function fav() {
+  const was = library.isFavorite(props.track)
   library.toggleFavorite(props.track)
+  tick('success')
+  ui.ok(was ? '已取消收藏' : '已收藏')
 }
 
 async function dl() {
   err.value = ''
   if (!isDl.value && !canClientDirect(props.track)) {
     err.value = '无直链，无法下载'
+    ui.error(err.value)
     return
   }
   busy.value = true
   try {
-    if (isDl.value) await library.removeDownload(props.track)
-    else await library.download(props.track)
+    if (isDl.value) {
+      await library.removeDownload(props.track)
+      ui.ok('已移除下载')
+    } else {
+      await library.download(props.track)
+      tick('success')
+      ui.ok('已下载到本机')
+    }
   } catch (ex) {
     err.value = ex instanceof Error ? ex.message : '下载失败'
+    ui.error(err.value)
   } finally {
     busy.value = false
   }

@@ -2,21 +2,31 @@
 import { computed, ref, watch } from 'vue'
 import { usePlayerStore } from '@/stores/player'
 import { useLibraryStore } from '@/stores/library'
+import { useUiStore } from '@/stores/ui'
 import { api, formatTime } from '@/api/client'
 import CoverArt from './CoverArt.vue'
 import LyricsScroller from './LyricsScroller.vue'
 import PlayerIcons from './icons/PlayerIcons.vue'
 import { coverOf } from '@/lib/cover'
 import { canClientDirect } from '@/lib/directMedia'
+import { tick } from '@/lib/haptics'
 
 const player = usePlayerStore()
 const library = useLibraryStore()
+const ui = useUiStore()
 const track = computed(() => player.current)
 const lrc = ref('')
 const lyricsLoading = ref(false)
 const busy = ref(false)
 const focusLyrics = ref(true)
 const err = ref('')
+
+// drag-to-dismiss
+const dragY = ref(0)
+const dragging = ref(false)
+let startY = 0
+let startX = 0
+let activePointer = false
 
 const isFav = computed(() => (track.value ? library.isFavorite(track.value) : false))
 const isDl = computed(() => (track.value ? library.isDownloaded(track.value) : false))
@@ -26,12 +36,24 @@ const progressPct = computed(() => {
   if (!duration.value) return 0
   return Math.min(100, (player.currentTime / duration.value) * 100)
 })
+const sheetStyle = computed(() => {
+  if (!dragY.value) return undefined
+  return {
+    transform: `translateY(${dragY.value}px)`,
+    transition: dragging.value ? 'none' : 'transform 0.28s cubic-bezier(0.22,1,0.36,1)',
+  }
+})
+const backdropStyle = computed(() => {
+  const o = Math.max(0.15, 0.6 - dragY.value / 700)
+  return { opacity: String(o) }
+})
 
 watch(
   () => [player.showNowPlaying, track.value?.id] as const,
   async ([open, id]) => {
-    // lock body scroll while sheet open
     document.body.style.overflow = open ? 'hidden' : ''
+    dragY.value = 0
+    dragging.value = false
     if (!open || !id || !track.value) return
     err.value = ''
     lrc.value = track.value.lrc || ''
@@ -57,7 +79,10 @@ watch(
 
 function fav() {
   if (!track.value) return
+  const was = library.isFavorite(track.value)
   library.toggleFavorite(track.value)
+  tick('success')
+  ui.ok(was ? '已取消收藏' : '已收藏')
 }
 
 async function dl() {
@@ -65,14 +90,22 @@ async function dl() {
   err.value = ''
   if (!isDl.value && !canClientDirect(track.value)) {
     err.value = '无CDN直链，无法下载'
+    ui.error(err.value)
     return
   }
   busy.value = true
   try {
-    if (isDl.value) await library.removeDownload(track.value)
-    else await library.download(track.value)
+    if (isDl.value) {
+      await library.removeDownload(track.value)
+      ui.ok('已移除下载')
+    } else {
+      await library.download(track.value)
+      tick('success')
+      ui.ok('已下载到本机')
+    }
   } catch (e) {
     err.value = e instanceof Error ? e.message : '下载失败'
+    ui.error(err.value)
   } finally {
     busy.value = false
   }
@@ -83,8 +116,45 @@ function onSeek(e: Event) {
   player.seek(v)
 }
 
+function seekLyric(t: number) {
+  player.seek(Math.max(0, t))
+}
+
 function close() {
   player.showNowPlaying = false
+  dragY.value = 0
+}
+
+function onPointerDown(e: PointerEvent) {
+  // only from top handle / header zone (data-drag)
+  const t = e.target as HTMLElement
+  if (!t.closest('[data-drag-handle]')) return
+  activePointer = true
+  dragging.value = true
+  startY = e.clientY
+  startX = e.clientX
+  dragY.value = 0
+  ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+}
+
+function onPointerMove(e: PointerEvent) {
+  if (!activePointer) return
+  const dy = e.clientY - startY
+  const dx = Math.abs(e.clientX - startX)
+  if (dx > 48 && dy < 20) return
+  dragY.value = Math.max(0, dy)
+}
+
+function onPointerUp() {
+  if (!activePointer) return
+  activePointer = false
+  dragging.value = false
+  if (dragY.value > 120) {
+    tick('light')
+    close()
+  } else {
+    dragY.value = 0
+  }
 }
 </script>
 
@@ -93,21 +163,31 @@ function close() {
     <Transition name="sheet">
       <div
         v-if="player.showNowPlaying && track"
-        class="fixed inset-0 z-50 flex items-end justify-center bg-black/60 backdrop-blur-[3px]"
+        class="fixed inset-0 z-50 flex items-end justify-center"
         @click.self="close"
       >
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-[3px]" :style="backdropStyle" @click="close" />
         <div
           class="relative flex h-[min(96dvh,860px)] w-full max-w-lg flex-col overflow-hidden rounded-t-[30px] bg-gradient-to-b from-[#321f27] via-ink to-ink px-5 pt-3"
-          style="padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px))"
+          :style="[
+            { paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 0px))' },
+            sheetStyle || {},
+          ]"
+          @pointerdown="onPointerDown"
+          @pointermove="onPointerMove"
+          @pointerup="onPointerUp"
+          @pointercancel="onPointerUp"
         >
-          <button
-            type="button"
-            class="mx-auto mb-3 block h-1.5 w-12 shrink-0 rounded-full bg-white/25"
-            aria-label="收起"
-            @click="close"
-          />
+          <div data-drag-handle class="shrink-0 pb-1 pt-0.5">
+            <button
+              type="button"
+              class="mx-auto mb-2 block h-1.5 w-12 rounded-full bg-white/25"
+              aria-label="下滑关闭"
+              @click="close"
+            />
+          </div>
 
-          <div class="flex shrink-0 items-center gap-3">
+          <div data-drag-handle class="flex shrink-0 items-center gap-3">
             <button
               type="button"
               class="shrink-0 transition active:scale-[0.98]"
@@ -194,6 +274,7 @@ function close() {
               :lrc="lrc"
               :current-time="player.currentTime"
               :loading="lyricsLoading"
+              @seek="seekLyric"
             />
           </div>
 
@@ -256,13 +337,13 @@ function close() {
               </button>
             </div>
 
-            <button
-              type="button"
-              class="mx-auto mt-4 block text-[12px] text-muted/90 active:opacity-70"
-              @click="focusLyrics = !focusLyrics"
-            >
-              {{ focusLyrics ? '显示大封面' : '专注歌词' }}
-            </button>
+            <div class="mt-4 flex items-center justify-center gap-4 text-[12px] text-muted/90">
+              <button type="button" class="active:opacity-70" @click="focusLyrics = !focusLyrics">
+                {{ focusLyrics ? '显示大封面' : '专注歌词' }}
+              </button>
+              <span class="text-white/15">·</span>
+              <span class="tabular-nums">{{ player.index + 1 }}/{{ player.queue.length }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -275,16 +356,16 @@ function close() {
 .sheet-leave-active {
   transition: opacity 0.22s ease;
 }
-.sheet-enter-active > div,
-.sheet-leave-active > div {
+.sheet-enter-active .relative,
+.sheet-leave-active .relative {
   transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .sheet-enter-from,
 .sheet-leave-to {
   opacity: 0;
 }
-.sheet-enter-from > div,
-.sheet-leave-to > div {
+.sheet-enter-from .relative,
+.sheet-leave-to .relative {
   transform: translateY(18%);
 }
 
@@ -302,7 +383,6 @@ function close() {
   border-radius: 999px;
   background: white;
   box-shadow: 0 0 0 3px rgba(252, 60, 68, 0.28);
-  margin-top: 0;
 }
 .progress-abs::-webkit-slider-runnable-track {
   height: 100%;

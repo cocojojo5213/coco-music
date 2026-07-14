@@ -24,8 +24,9 @@ export function normalizeTrack(raw: Track): Track {
   // Prefer CDN direct; never normalize toward same-origin /api/proxy.
   const url = direct || raw.url || raw.streamUrl || ''
   const duration =
-    raw.duration ||
-    (raw.durationMs ? Math.round(raw.durationMs / 1000) : 0)
+    Number(raw.duration) ||
+    (raw.durationMs ? Math.round(Number(raw.durationMs) / 1000) : 0) ||
+    0
   return {
     ...raw,
     title: raw.title || '未知歌曲',

@@ -4,6 +4,7 @@ import type { Track } from '@/types'
 import { localPlaybackUrl, trackKey } from '@/lib/localLibrary'
 import { canClientDirect } from '@/lib/directMedia'
 import { coverOf } from '@/lib/cover'
+import { tick } from '@/lib/haptics'
 
 export const usePlayerStore = defineStore('player', {
   state: () => ({
@@ -14,9 +15,11 @@ export const usePlayerStore = defineStore('player', {
     duration: 0,
     showNowPlaying: false,
     audio: null as HTMLAudioElement | null,
+    preloadAudio: null as HTMLAudioElement | null,
     loading: false,
     error: '' as string,
     objectUrl: '' as string,
+    skipStreak: 0,
   }),
   getters: {
     current(state): Track | null {
@@ -27,14 +30,15 @@ export const usePlayerStore = defineStore('player', {
       if (!state.duration) return 0
       return Math.min(1, state.currentTime / state.duration)
     },
+    hasNext(state): boolean {
+      return state.queue.length > 1
+    },
   },
   actions: {
     ensureAudio() {
       if (this.audio) return this.audio
       const audio = new Audio()
       audio.preload = 'metadata'
-      // Do NOT set crossOrigin — some CDNs allow media element play without CORS
-      // headers, but break when crossOrigin=anonymous is forced.
       audio.addEventListener('timeupdate', () => {
         this.currentTime = audio.currentTime
         this.patchMediaPosition()
@@ -44,6 +48,10 @@ export const usePlayerStore = defineStore('player', {
       })
       audio.addEventListener('waiting', () => {
         this.loading = true
+      })
+      audio.addEventListener('playing', () => {
+        this.loading = false
+        this.skipStreak = 0
       })
       audio.addEventListener('canplay', () => {
         this.loading = false
@@ -62,10 +70,14 @@ export const usePlayerStore = defineStore('player', {
         this.playing = false
         this.loading = false
         this.error = '播放失败，已跳过'
-        // auto-advance on bad CDN link
+        this.skipStreak += 1
+        if (this.skipStreak >= this.queue.length) {
+          this.error = '当前队列暂时无法播放'
+          return
+        }
         window.setTimeout(() => {
           void this.next()
-        }, 350)
+        }, 280)
       })
       this.audio = audio
       return audio
@@ -119,7 +131,35 @@ export const usePlayerStore = defineStore('player', {
           playbackRate: 1,
         })
       } catch {
-        // ignore invalid state
+        // ignore
+      }
+    },
+    async resolveSrc(track: Track): Promise<string> {
+      try {
+        const local = await localPlaybackUrl(track)
+        if (local) return local
+      } catch {
+        // ignore
+      }
+      return mediaSrc(track, false)
+    },
+    async prefetchNext() {
+      if (this.queue.length < 2) return
+      const next = this.queue[(this.index + 1) % this.queue.length]
+      if (!next) return
+      try {
+        const src = await this.resolveSrc(next)
+        if (!src || src.startsWith('blob:')) return
+        if (!this.preloadAudio) this.preloadAudio = new Audio()
+        const pre = this.preloadAudio
+        pre.preload = 'auto'
+        if (pre.src !== src) {
+          pre.src = src
+          // kick network without playing
+          pre.load()
+        }
+      } catch {
+        // ignore
       }
     },
     async playTracks(tracks: Track[], startId?: string) {
@@ -131,6 +171,7 @@ export const usePlayerStore = defineStore('player', {
         return
       }
       this.queue = [...playable]
+      this.skipStreak = 0
       let idx = 0
       if (startId) {
         const found = playable.findIndex(
@@ -152,7 +193,7 @@ export const usePlayerStore = defineStore('player', {
       const audio = this.ensureAudio()
       this.loading = true
       this.currentTime = 0
-      this.duration = 0
+      this.duration = track.duration || 0
       this.error = ''
       this.revokeObjectUrl()
       this.updateMediaSession(track)
@@ -176,12 +217,17 @@ export const usePlayerStore = defineStore('player', {
         return
       }
 
+      // reuse preloaded element source when possible
+      if (this.preloadAudio?.src && this.preloadAudio.src === src) {
+        // keep main audio element, just assign
+      }
       audio.src = src
       try {
         if (autoplay) await audio.play()
         void api.playEvent(track)
+        void this.prefetchNext()
       } catch {
-        // autoplay blocked — still keep src ready
+        // autoplay blocked
       } finally {
         this.loading = false
       }
@@ -194,16 +240,19 @@ export const usePlayerStore = defineStore('player', {
         await this.loadCurrent(true)
         return
       }
+      tick('light')
       if (audio.paused) await audio.play()
       else audio.pause()
     },
     async next() {
       if (!this.queue.length) return
+      tick('light')
       this.index = (this.index + 1) % this.queue.length
       await this.loadCurrent(true)
     },
     async prev() {
       if (!this.queue.length) return
+      tick('light')
       if (this.currentTime > 3) {
         this.seek(0)
         return

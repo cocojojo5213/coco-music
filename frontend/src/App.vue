@@ -4,6 +4,7 @@ import { useLibraryStore } from '@/stores/library'
 import TabBar from '@/components/TabBar.vue'
 import MiniPlayer from '@/components/MiniPlayer.vue'
 import NowPlaying from '@/components/NowPlaying.vue'
+import ToastHost from '@/components/ToastHost.vue'
 
 const library = useLibraryStore()
 
@@ -28,6 +29,7 @@ onMounted(() => {
     <MiniPlayer />
     <TabBar />
     <NowPlaying />
+    <ToastHost />
   </div>
 </template>
 

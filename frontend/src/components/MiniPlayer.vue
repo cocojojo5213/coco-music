@@ -42,6 +42,9 @@ const progressPct = computed(() => Math.round((player.progress || 0) * 1000) / 1
             <div class="truncate text-[13px] font-semibold leading-tight">{{ track.title }}</div>
             <div class="truncate text-[11px] leading-tight text-muted">
               {{ player.error || track.artist }}
+              <template v-if="!player.error && player.queue.length > 1">
+                · {{ player.index + 1 }}/{{ player.queue.length }}
+              </template>
             </div>
           </div>
         </button>
