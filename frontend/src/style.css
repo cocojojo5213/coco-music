@@ -27,6 +27,13 @@ body,
 
 body {
   overscroll-behavior-y: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* smoother mobile momentum without ugly rubber-band flash */
+#app {
+  isolation: isolate;
 }
 
 .safe-top {
@@ -55,6 +62,13 @@ body {
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* horizontal rail edge fade hint */
+.rail-fade {
+  mask-image: linear-gradient(to right, #000 0%, #000 88%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, #000 0%, #000 88%, transparent 100%);
 }
 
 .transport-btn {

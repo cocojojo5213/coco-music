@@ -4,6 +4,7 @@ import { useLibraryStore } from '@/stores/library'
 import { usePlayerStore } from '@/stores/player'
 import TrackRow from '@/components/TrackRow.vue'
 import CoverArt from '@/components/CoverArt.vue'
+import PlayerIcons from '@/components/icons/PlayerIcons.vue'
 import { coverOf } from '@/lib/cover'
 
 const library = useLibraryStore()
@@ -18,6 +19,7 @@ const greeting = computed(() => {
 
 const hero = computed(() => library.tracks[0] || null)
 const rail = computed(() => library.tracks.slice(0, 12))
+const skeleton = computed(() => library.loading && !library.tracks.length)
 
 async function playAll() {
   await player.playTracks(library.tracks)
@@ -36,8 +38,8 @@ async function playOne(id: string) {
 function searchCount(t: { searchCount?: number }) {
   const n = Number(t.searchCount || 0)
   if (!n) return ''
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k 次搜索`
-  return `${n} 次搜索`
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k 次`
+  return `${n} 次`
 }
 </script>
 
@@ -51,11 +53,12 @@ function searchCount(t: { searchCount?: number }) {
       <div class="flex shrink-0 gap-2">
         <button
           type="button"
-          class="h-9 rounded-full bg-white/10 px-3 text-[13px] active:scale-95"
-          :disabled="library.loading"
+          class="inline-flex h-9 items-center gap-1 rounded-full bg-white/10 px-3 text-[13px] active:scale-95 disabled:opacity-50"
+          :disabled="library.loading || library.refreshing"
           @click="refresh"
         >
-          {{ library.loading ? '…' : '刷新' }}
+          <PlayerIcons v-if="library.refreshing || library.loading" name="spinner" :size="14" />
+          <span>{{ library.refreshing || library.loading ? '刷新中' : '刷新' }}</span>
         </button>
         <button
           type="button"
@@ -68,9 +71,18 @@ function searchCount(t: { searchCount?: number }) {
       </div>
     </header>
 
-    <section v-if="library.loading && !library.tracks.length" class="py-20 text-center text-muted">
-      加载站友搜索榜…
+    <!-- skeleton -->
+    <section v-if="skeleton" class="space-y-5">
+      <div class="glass-card h-[76px] animate-pulse rounded-3xl" />
+      <div class="mx-auto aspect-square w-[min(68vw,240px)] animate-pulse rounded-[22px] bg-white/5" />
+      <div class="flex gap-3 overflow-hidden">
+        <div v-for="i in 4" :key="i" class="h-[118px] w-[118px] shrink-0 animate-pulse rounded-2xl bg-white/5" />
+      </div>
+      <div class="glass-card space-y-2 rounded-3xl p-3">
+        <div v-for="i in 6" :key="'s' + i" class="h-14 animate-pulse rounded-2xl bg-white/5" />
+      </div>
     </section>
+
     <section v-else-if="library.error && !library.tracks.length" class="py-16 text-center">
       <p class="text-accent">{{ library.error }}</p>
       <button type="button" class="mt-3 h-9 rounded-full bg-white/10 px-4 text-sm" @click="refresh">
@@ -119,8 +131,9 @@ function searchCount(t: { searchCount?: number }) {
       <section v-if="rail.length" class="mb-7">
         <div class="mb-3 flex items-center justify-between">
           <h2 class="text-[20px] font-bold leading-none">封面速览</h2>
+          <span class="text-[11px] text-muted">左右滑动</span>
         </div>
-        <div class="no-scrollbar -mx-4 flex gap-3 overflow-x-auto px-4 pb-1">
+        <div class="rail-fade no-scrollbar -mx-4 flex gap-3 overflow-x-auto px-4 pb-1">
           <button
             v-for="(t, idx) in rail"
             :key="'rail-' + t.id + '-' + idx"

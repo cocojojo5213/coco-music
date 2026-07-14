@@ -10,8 +10,10 @@ const router = createRouter({
     { path: '/search', name: 'search', component: SearchView },
     { path: '/library', name: 'library', component: LibraryView },
   ],
-  scrollBehavior() {
-    return { top: 0 }
+  scrollBehavior(to, from, saved) {
+    if (saved) return saved
+    if (to.path === from.path) return false
+    return { top: 0, behavior: 'smooth' }
   },
 })
 

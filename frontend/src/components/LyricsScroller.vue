@@ -99,6 +99,7 @@ watch(active, async (idx, prev) => {
   color: #fff;
   font-size: 18px;
   font-weight: 700;
-  transform: scale(1.02);
+  transform: scale(1.03);
+  text-shadow: 0 0 24px rgba(252, 60, 68, 0.25);
 }
 </style>

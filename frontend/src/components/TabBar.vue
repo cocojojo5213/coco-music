@@ -1,22 +1,22 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from 'vue-router'
+import PlayerIcons from './icons/PlayerIcons.vue'
 
 const route = useRoute()
 const router = useRouter()
 
 const tabs = [
-  { name: 'home', label: '现在就听', path: '/', icon: '♪' },
-  { name: 'search', label: '搜索', path: '/search', icon: '⌕' },
-  { name: 'library', label: '资料库', path: '/library', icon: '☰' },
+  { name: 'home', label: '现在就听', path: '/', icon: 'home' as const },
+  { name: 'search', label: '搜索', path: '/search', icon: 'search' as const },
+  { name: 'library', label: '资料库', path: '/library', icon: 'library' as const },
 ]
 
 function go(path: string) {
-  router.push(path)
+  if (route.path !== path) router.push(path)
 }
 </script>
 
 <template>
-  <!-- height = content row + home-indicator safe area (padding outside content) -->
   <nav
     class="glass fixed inset-x-0 bottom-0 z-40 mx-auto max-w-lg border-t border-white/5"
     style="padding-bottom: env(safe-area-inset-bottom, 0px)"
@@ -30,7 +30,7 @@ function go(path: string) {
         :class="route.name === tab.name ? 'text-accent' : 'text-muted'"
         @click="go(tab.path)"
       >
-        <span class="text-[18px] leading-none">{{ tab.icon }}</span>
+        <PlayerIcons :name="tab.icon" :size="20" />
         <span class="text-[10px] font-medium leading-none tracking-wide">{{ tab.label }}</span>
       </button>
     </div>

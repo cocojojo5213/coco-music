@@ -18,6 +18,7 @@ export const useLibraryStore = defineStore('library', {
     favorites: loadFavorites() as Track[],
     downloads: loadDownloadMeta() as Track[],
     loading: false,
+    refreshing: false,
     error: '' as string,
     status: '' as string,
   }),
@@ -32,8 +33,18 @@ export const useLibraryStore = defineStore('library', {
         favoriteKey: trackKey(t),
       }))
     },
-    async loadHot(_refresh = false) {
-      this.loading = true
+    rematerialize() {
+      this.tracks = this.markFlags(this.tracks)
+      this.favorites = this.markFlags(this.favorites)
+      this.downloads = this.markFlags(this.downloads)
+      if (this.chart) {
+        this.chart = { ...this.chart, items: this.markFlags(this.chart.items) }
+      }
+    },
+    async loadHot(refresh = false) {
+      const hasData = this.tracks.length > 0
+      if (hasData) this.refreshing = true
+      else this.loading = true
       this.error = ''
       this.status = '加载站友搜索榜…'
       try {
@@ -41,15 +52,18 @@ export const useLibraryStore = defineStore('library', {
           const board = await api.charts()
           const chart = (board.items || [])[0]
           if (chart?.items?.length) {
-            this.chart = chart
-            this.tracks = this.markFlags(chart.items)
+            this.chart = {
+              ...chart,
+              items: this.markFlags(chart.items),
+            }
+            this.tracks = this.chart.items
             this.status = chart.description || chart.name
             return
           }
         } catch {
           // fall through
         }
-        const data = await api.hot(24, _refresh)
+        const data = await api.hot(24, refresh)
         this.tracks = this.markFlags(data.items || [])
         this.chart = {
           id: data.ranking || 'community-search',
@@ -59,59 +73,47 @@ export const useLibraryStore = defineStore('library', {
         }
         this.status = data.note || data.emptyReason || '站友搜索榜'
       } catch (e) {
-        this.error = e instanceof Error ? e.message : 'load failed'
-        this.tracks = []
+        if (!hasData) {
+          this.error = e instanceof Error ? e.message : '加载失败'
+          this.tracks = []
+        }
       } finally {
         this.loading = false
-      }
-    },
-    async search(q: string) {
-      this.loading = true
-      this.error = ''
-      this.status = ''
-      try {
-        const data = await api.search(q)
-        this.tracks = this.markFlags(data.items || [])
-        this.status = data.emptyReason || (this.tracks.length ? '' : '没有找到可完整播放的音乐')
-      } catch (e) {
-        this.error = e instanceof Error ? e.message : 'search failed'
-        this.tracks = []
-      } finally {
-        this.loading = false
+        this.refreshing = false
       }
     },
     toggleFavorite(track: Track) {
       const key = trackKey(track)
       const idx = this.favorites.findIndex((t) => trackKey(t) === key)
-      if (idx >= 0) {
-        this.favorites.splice(idx, 1)
-      } else {
-        this.favorites.unshift({ ...track, isFavorite: true })
-      }
+      if (idx >= 0) this.favorites.splice(idx, 1)
+      else this.favorites.unshift({ ...track, isFavorite: true })
       saveFavorites(this.favorites)
-      this.tracks = this.markFlags(this.tracks)
-      this.downloads = this.markFlags(this.downloads)
-      if (this.chart) {
-        this.chart = { ...this.chart, items: this.markFlags(this.chart.items) }
-      }
+      this.rematerialize()
     },
     isFavorite(track: Track) {
       const key = trackKey(track)
       return this.favorites.some((t) => trackKey(t) === key)
     },
+    isDownloaded(track: Track) {
+      const key = trackKey(track)
+      return this.downloads.some((t) => trackKey(t) === key)
+    },
     async download(track: Track) {
       const saved = await downloadTrackClient(track)
       const key = trackKey(saved)
-      this.downloads = [{ ...saved, isDownloaded: true }, ...this.downloads.filter((t) => trackKey(t) !== key)]
+      this.downloads = [
+        { ...saved, isDownloaded: true },
+        ...this.downloads.filter((t) => trackKey(t) !== key),
+      ]
       saveDownloadMeta(this.downloads)
-      this.tracks = this.markFlags(this.tracks)
+      this.rematerialize()
     },
     async removeDownload(track: Track) {
       const key = trackKey(track)
       await idbDeleteAudio(key)
       this.downloads = this.downloads.filter((t) => trackKey(t) !== key)
       saveDownloadMeta(this.downloads)
-      this.tracks = this.markFlags(this.tracks)
+      this.rematerialize()
     },
   },
 })

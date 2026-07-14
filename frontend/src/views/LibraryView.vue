@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { useLibraryStore } from '@/stores/library'
 import TrackRow from '@/components/TrackRow.vue'
+import PlayerIcons from '@/components/icons/PlayerIcons.vue'
 
 const library = useLibraryStore()
 const tab = ref<'favorites' | 'downloads'>('favorites')
@@ -41,9 +42,12 @@ const tab = ref<'favorites' | 'downloads'>('favorites')
         :track="t"
         :queue="library.favorites"
       />
-      <div v-if="!library.favorites.length" class="py-16 text-center text-muted">
-        还没有收藏<br />
-        <span class="text-xs">点列表里的心形即可收藏</span>
+      <div v-if="!library.favorites.length" class="px-4 py-16 text-center text-muted">
+        <div class="mb-3 flex justify-center text-white/25">
+          <PlayerIcons name="heart" :size="28" />
+        </div>
+        还没有收藏
+        <div class="mt-1 text-xs">点列表里的心形即可收藏</div>
       </div>
     </div>
 
@@ -54,9 +58,12 @@ const tab = ref<'favorites' | 'downloads'>('favorites')
         :track="t"
         :queue="library.downloads"
       />
-      <div v-if="!library.downloads.length" class="py-16 text-center text-muted">
-        还没有下载<br />
-        <span class="text-xs">点 ↓ 直链保存到本机，并可离线播放</span>
+      <div v-if="!library.downloads.length" class="px-4 py-16 text-center text-muted">
+        <div class="mb-3 flex justify-center text-white/25">
+          <PlayerIcons name="download" :size="28" />
+        </div>
+        还没有下载
+        <div class="mt-1 text-xs">点下载图标直链保存，并可离线播放</div>
       </div>
     </div>
   </div>

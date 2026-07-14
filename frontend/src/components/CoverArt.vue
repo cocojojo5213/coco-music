@@ -1,17 +1,25 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
+import PlayerIcons from './icons/PlayerIcons.vue'
 
 const props = withDefaults(
   defineProps<{
     src: string
     alt?: string
-    /** preset sizes — prefer this over free-form classes for stable layout */
     size?: 'xs' | 'sm' | 'md' | 'lg' | 'tile' | 'xl' | 'hero' | 'now'
     rounded?: string
   }>(),
   {
     size: 'md',
     rounded: 'rounded-xl',
+  },
+)
+
+const broken = ref(false)
+watch(
+  () => props.src,
+  () => {
+    broken.value = false
   },
 )
 
@@ -26,12 +34,10 @@ const boxClass = computed(() => {
     case 'lg':
       return 'h-24 w-24'
     case 'tile':
-      // horizontal rail card
       return 'h-[118px] w-[118px]'
     case 'xl':
       return 'h-40 w-40'
     case 'hero':
-      // featured square, not a wide banner
       return 'mx-auto aspect-square w-[min(68vw,240px)]'
     case 'now':
       return 'mx-auto aspect-square w-[min(70vw,280px)]'
@@ -40,34 +46,54 @@ const boxClass = computed(() => {
   }
 })
 
+const iconSize = computed(() => {
+  switch (props.size) {
+    case 'xs':
+      return 14
+    case 'sm':
+      return 16
+    case 'tile':
+    case 'lg':
+      return 28
+    case 'hero':
+    case 'now':
+    case 'xl':
+      return 42
+    default:
+      return 20
+  }
+})
+
 const shadowClass = computed(() =>
   props.size === 'hero' || props.size === 'now' || props.size === 'xl' || props.size === 'lg'
     ? 'shadow-[0_18px_50px_rgba(0,0,0,0.45)]'
     : 'shadow-[0_6px_18px_rgba(0,0,0,0.35)]',
 )
+
+const showImg = computed(() => !!props.src && !broken.value)
 </script>
 
 <template>
   <div
-    class="relative shrink-0 overflow-hidden bg-panel-2"
+    class="relative shrink-0 overflow-hidden bg-gradient-to-br from-[#2a2a34] via-panel-2 to-[#121218]"
     :class="[boxClass, rounded, shadowClass]"
   >
     <img
-      v-if="src"
+      v-if="showImg"
       :src="src"
       :alt="alt || ''"
-      class="absolute inset-0 h-full w-full object-cover"
+      class="absolute inset-0 h-full w-full object-cover transition-opacity duration-300"
       loading="lazy"
       decoding="async"
       draggable="false"
-      @error="($event.target as HTMLImageElement).style.opacity = '0.15'"
+      @error="broken = true"
     />
     <div
       v-else
-      class="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-white/10 to-white/0 text-lg text-white/30"
+      class="absolute inset-0 flex items-center justify-center text-white/25"
     >
-      ♪
+      <PlayerIcons name="music" :size="iconSize" />
     </div>
-    <div class="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/15 to-transparent" />
+    <div class="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-white/5" />
   </div>
 </template>

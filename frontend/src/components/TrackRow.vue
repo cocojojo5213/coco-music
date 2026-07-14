@@ -20,9 +20,13 @@ const library = useLibraryStore()
 const busy = ref(false)
 const err = ref('')
 
-const directOk = computed(() => canClientDirect(props.track) || !!props.track.isDownloaded)
+const directOk = computed(() => canClientDirect(props.track) || library.isDownloaded(props.track))
 const isFav = computed(() => library.isFavorite(props.track))
-const isPlaying = computed(() => player.current && trackKey(player.current) === trackKey(props.track))
+const isDl = computed(() => library.isDownloaded(props.track))
+const isCurrent = computed(
+  () => !!player.current && trackKey(player.current) === trackKey(props.track),
+)
+const isPlaying = computed(() => isCurrent.value && player.playing)
 
 async function play() {
   const q = props.queue?.length ? props.queue : [props.track]
@@ -35,13 +39,13 @@ function fav() {
 
 async function dl() {
   err.value = ''
-  if (!props.track.isDownloaded && !canClientDirect(props.track)) {
-    err.value = '无直链，无法下载（不经本站中转）'
+  if (!isDl.value && !canClientDirect(props.track)) {
+    err.value = '无直链，无法下载'
     return
   }
   busy.value = true
   try {
-    if (props.track.isDownloaded) await library.removeDownload(props.track)
+    if (isDl.value) await library.removeDownload(props.track)
     else await library.download(props.track)
   } catch (ex) {
     err.value = ex instanceof Error ? ex.message : '下载失败'
@@ -52,25 +56,31 @@ async function dl() {
 </script>
 
 <template>
-  <div class="rounded-2xl transition" :class="isPlaying ? 'bg-white/[0.06]' : ''">
-    <div class="flex w-full items-center gap-2.5 px-1.5 py-2">
+  <div
+    class="rounded-2xl transition-colors"
+    :class="isCurrent ? 'bg-white/[0.06]' : 'hover:bg-white/[0.03]'"
+  >
+    <div class="flex w-full items-center gap-1.5 px-1 py-1.5">
       <button
         type="button"
-        class="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-1 py-0.5 text-left active:bg-white/5"
+        class="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-1.5 py-1 text-left active:bg-white/5"
         @click="play"
       >
         <div class="relative shrink-0">
           <CoverArt :src="coverOf(track)" size="sm" rounded="rounded-[10px]" />
           <span
-            v-if="isPlaying && player.playing"
-            class="absolute inset-0 flex items-center justify-center rounded-[10px] bg-black/35 text-[11px] text-white"
-            >▶</span
+            v-if="isPlaying"
+            class="absolute inset-0 flex items-center justify-center rounded-[10px] bg-black/40 text-white"
           >
+            <span class="eq" aria-hidden="true">
+              <i /><i /><i />
+            </span>
+          </span>
         </div>
         <div class="min-w-0 flex-1">
           <div
             class="truncate text-[15px] font-semibold leading-tight"
-            :class="isPlaying ? 'text-accent' : ''"
+            :class="isCurrent ? 'text-accent' : ''"
           >
             {{ track.title }}
           </div>
@@ -78,7 +88,7 @@ async function dl() {
             {{ track.artist }}
             <template v-if="track.duration"> · {{ formatTime(track.duration) }}</template>
             <template v-if="track.audioBytes"> · {{ formatBytes(track.audioBytes) }}</template>
-            <template v-if="track.isDownloaded"> · 本地</template>
+            <template v-if="isDl"> · 本地</template>
           </div>
         </div>
       </button>
@@ -95,25 +105,56 @@ async function dl() {
         </button>
         <button
           type="button"
-          class="transport-btn h-10 w-10 text-[15px] font-semibold"
-          :class="
-            track.isDownloaded
-              ? 'text-accent'
-              : !directOk
-                ? 'text-white/25'
-                : busy
-                  ? 'text-white/40'
-                  : 'text-muted'
-          "
-          :title="track.isDownloaded ? '移除下载' : directOk ? '直链下载' : '无CDN直链'"
-          :aria-label="track.isDownloaded ? '移除下载' : '下载'"
-          :disabled="busy || (!track.isDownloaded && !directOk)"
+          class="transport-btn h-10 w-10"
+          :class="isDl ? 'text-accent' : !directOk ? 'text-white/25' : busy ? 'text-white/40' : 'text-muted'"
+          :title="isDl ? '移除下载' : directOk ? '直链下载' : '无CDN直链'"
+          :aria-label="isDl ? '移除下载' : '下载'"
+          :disabled="busy || (!isDl && !directOk)"
           @click="dl"
         >
-          {{ track.isDownloaded ? '✓' : busy ? '…' : '↓' }}
+          <PlayerIcons v-if="busy" name="spinner" :size="18" />
+          <PlayerIcons v-else-if="isDl" name="check" :size="18" />
+          <PlayerIcons v-else name="download" :size="18" />
         </button>
       </div>
     </div>
     <p v-if="err" class="px-3 pb-2 text-[11px] text-accent">{{ err }}</p>
   </div>
 </template>
+
+<style scoped>
+.eq {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+}
+.eq i {
+  display: block;
+  width: 2.5px;
+  border-radius: 1px;
+  background: #fff;
+  animation: eq 0.9s ease-in-out infinite;
+}
+.eq i:nth-child(1) {
+  height: 5px;
+  animation-delay: 0s;
+}
+.eq i:nth-child(2) {
+  height: 11px;
+  animation-delay: 0.15s;
+}
+.eq i:nth-child(3) {
+  height: 7px;
+  animation-delay: 0.3s;
+}
+@keyframes eq {
+  0%,
+  100% {
+    transform: scaleY(0.45);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+</style>
